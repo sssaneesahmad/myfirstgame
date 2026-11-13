@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Settings } from 'lucide-react';
+import { Clock, Settings } from 'lucide-react';
 
 interface GameHeaderProps {
   levelNumber: number;
-  moves: number;
+  movesLeft: number;
+  timeLeft: number;
   coins: number;
   canClaimDaily: boolean;
   onOpenSettings: () => void;
@@ -11,9 +12,17 @@ interface GameHeaderProps {
   onOpenLevels: () => void;
 }
 
+function formatSeconds(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 export const GameHeader: React.FC<GameHeaderProps> = ({
   levelNumber,
-  moves,
+  movesLeft,
+  timeLeft,
   coins,
   canClaimDaily,
   onOpenSettings,
@@ -34,6 +43,12 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
       setPrevCoins(coins);
     }
   }, [coins, prevCoins]);
+
+  const isTimeCritical = timeLeft <= 5;
+  const isTimeWarning = timeLeft > 5 && timeLeft <= 12;
+
+  const isMovesCritical = movesLeft <= 1;
+  const isMovesWarning = movesLeft > 1 && movesLeft <= 3;
 
   return (
     <header className="relative z-20 w-full max-w-4xl mx-auto px-3 sm:px-6 safe-pt pt-3 pb-2 flex items-center justify-between gap-2">
@@ -79,11 +94,11 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
         )}
       </button>
 
-      {/* Center: Level Indicator */}
+      {/* Center: Level Indicator + Live Timer & Moves Remaining */}
       <button
         type="button"
         onClick={onOpenLevels}
-        aria-label={`Level ${levelNumber}, ${moves} moves. Choose level`}
+        aria-label={`Level ${levelNumber}, ${formatSeconds(timeLeft)} remaining, ${movesLeft} moves left. Choose level`}
         className="group flex flex-col items-center justify-center px-3 py-1 rounded-2xl hover:bg-white/5 active:scale-95 transition-all duration-150 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#27D9FF]"
       >
         <div
@@ -95,10 +110,34 @@ export const GameHeader: React.FC<GameHeaderProps> = ({
         >
           LEVEL <span className="font-mono-nums text-[#A7EEFF]">{levelNumber}</span>
         </div>
-        <div className="text-[11px] sm:text-xs font-medium text-[#A7EEFF]/75 flex items-center gap-1.5 whitespace-nowrap">
-          <span className="font-mono-nums">Moves: {moves}</span>
-          <span aria-hidden="true">·</span>
-          <span className="group-hover:text-[#27D9FF] transition-colors">Select</span>
+
+        <div className="text-[11px] sm:text-xs font-medium flex items-center gap-1.5 whitespace-nowrap">
+          <span
+            className={`inline-flex items-center gap-1 font-mono-nums font-bold transition-colors ${
+              isTimeCritical
+                ? 'text-[#FF6A7D] animate-pulse'
+                : isTimeWarning
+                  ? 'text-[#FFD32F]'
+                  : 'text-[#27D9FF]'
+            }`}
+          >
+            <Clock className="w-3 h-3" aria-hidden="true" />
+            {formatSeconds(timeLeft)}
+          </span>
+          <span className="text-[#A7EEFF]/45" aria-hidden="true">
+            ·
+          </span>
+          <span
+            className={`font-mono-nums font-bold transition-colors ${
+              isMovesCritical
+                ? 'text-[#FF6A7D] animate-pulse'
+                : isMovesWarning
+                  ? 'text-[#FFD32F]'
+                  : 'text-[#A7EEFF]/85'
+            }`}
+          >
+            {movesLeft} {movesLeft === 1 ? 'Move' : 'Moves'} Left
+          </span>
         </div>
       </button>
 

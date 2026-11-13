@@ -1,6 +1,6 @@
 import React from 'react';
-import { Lightbulb, Plus, RotateCcw, Undo2 } from 'lucide-react';
-import { EXTRA_BOTTLE_COST, HINT_COST } from '../game/types';
+import { Lightbulb, Play, Plus, RotateCcw, Undo2 } from 'lucide-react';
+import { HINT_COST } from '../game/types';
 
 interface GameControlsProps {
   canUndo: boolean;
@@ -27,12 +27,11 @@ export const GameControls: React.FC<GameControlsProps> = ({
   onAddBottle,
   onHint,
 }) => {
-  const canAffordExtra = coins >= EXTRA_BOTTLE_COST;
   const canAffordHint = coins >= HINT_COST;
 
   return (
     <footer className="relative z-20 w-full max-w-xl mx-auto px-3 sm:px-6 safe-pb pb-3 pt-2 flex flex-col items-center gap-2.5">
-      {/* Primary Trio Control Bar: Restart / Undo / Add Bottle + Hint */}
+      {/* Primary Control Bar: Restart / Undo / Add Bottle (Watch Ad) / Hint */}
       <div className="flex items-center justify-center gap-3 sm:gap-5 w-full">
         {/* Restart Button */}
         <button
@@ -69,23 +68,24 @@ export const GameControls: React.FC<GameControlsProps> = ({
           )}
         </button>
 
-        {/* Add Bottle Button */}
+        {/* Add Bottle Button (Watch Ad to Unlock) */}
         <button
           type="button"
           onClick={onAddBottle}
-          disabled={disabled || !canAddBottle || !canAffordExtra}
-          aria-label={`Add extra empty bottle for ${EXTRA_BOTTLE_COST} coins`}
+          disabled={disabled || !canAddBottle}
+          aria-label={
+            canAddBottle
+              ? 'Watch an ad to add an extra empty bottle'
+              : 'Maximum extra bottles added'
+          }
           title={
-            !canAddBottle
-              ? 'Maximum extra bottles added'
-              : !canAffordExtra
-                ? `Need ${EXTRA_BOTTLE_COST} coins`
-                : `Add extra bottle (${EXTRA_BOTTLE_COST} coins)`
+            canAddBottle
+              ? 'Watch Ad to add +1 empty bottle'
+              : 'Maximum extra bottles added'
           }
           className="group relative flex flex-col items-center justify-center w-16 h-14 sm:w-20 sm:h-16 rounded-2xl bg-gradient-to-b from-[#2DA3FF] via-[#087BFF] to-[#054EC2] border border-[#8EDBFF]/65 shadow-[0_8px_22px_rgba(8,123,255,0.45),inset_0_2px_0_rgba(255,255,255,0.45)] hover:brightness-110 hover:shadow-[0_0_26px_rgba(39,217,255,0.65)] active:translate-y-0.5 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#27D9FF]"
         >
           <div className="relative flex items-center justify-center">
-            {/* Custom Mini Bottle + Plus Icon */}
             <svg
               viewBox="0 0 28 28"
               fill="none"
@@ -112,13 +112,20 @@ export const GameControls: React.FC<GameControlsProps> = ({
           </span>
 
           <span
-            className={`absolute -top-2 -right-2 px-1.5 h-[22px] flex items-center justify-center rounded-full font-mono-nums text-[10px] font-bold shadow-md ${
-              canAddBottle && canAffordExtra
+            className={`absolute -top-2 -right-2 px-1.5 h-[22px] flex items-center justify-center gap-0.5 rounded-full font-mono-nums text-[10px] font-bold shadow-md ${
+              canAddBottle
                 ? 'bg-[#FFD32F] text-[#050A2D]'
                 : 'bg-[#18255E] text-[#A7EEFF]/70 border border-[#A7EEFF]/25'
             }`}
           >
-            {extraBottlesAdded >= 2 ? 'MAX' : `${EXTRA_BOTTLE_COST}c`}
+            {extraBottlesAdded >= 2 ? (
+              'MAX'
+            ) : (
+              <>
+                <Play className="w-2.5 h-2.5 fill-current" aria-hidden="true" />
+                <span>AD</span>
+              </>
+            )}
           </span>
         </button>
 

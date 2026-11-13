@@ -5,8 +5,10 @@ import { GameControls } from './components/GameControls';
 import { GameHeader } from './components/GameHeader';
 import { HowToPlayModal } from './components/HowToPlayModal';
 import { LandingScreen } from './components/LandingScreen';
+import { FailReason, LevelFailedModal } from './components/LevelFailedModal';
 import { LevelSelectModal } from './components/LevelSelectModal';
 import { ParticleBackground } from './components/ParticleBackground';
+import { RewardedAdModal } from './components/RewardedAdModal';
 import { RewardModal } from './components/RewardModal';
 import { SettingsModal } from './components/SettingsModal';
 import { WinModal } from './components/WinModal';
@@ -16,6 +18,8 @@ import {
   checkWinCondition,
   findHintMove,
   generateLevel,
+  getLevelMoveLimit,
+  getLevelTimeLimit,
   isBottleCompleted,
   levelConfigToBottleStates,
   performPour,
@@ -23,9 +27,11 @@ import {
   validateMove,
 } from './game/engine';
 import {
+  ADD_MOVES_COUNT,
+  ADD_TIME_SECONDS,
+  AdRewardType,
   BottleState,
   DAILY_REWARD_COINS,
-  EXTRA_BOTTLE_COST,
   GameSettings,
   HINT_COST,
   LEVEL_REWARD_COINS,
@@ -34,6 +40,7 @@ import {
   PourAnimationState,
   STREAK_BONUS_COINS,
 } from './game/types';
+import { triggerRewardedAd } from './utils/adManager';
 import { soundEngine, triggerVibration } from './utils/sound';
 import {
   clearBoardState,
@@ -81,10 +88,41 @@ export default function App() {
     return saved ? saved.moves : 0;
   });
 
+  const [moveLimit, setMoveLimit] = useState<number>(() => {
+    const saved = loadBoardState(progress.currentLevel);
+    return saved ? saved.moveLimit : getLevelMoveLimit(progress.currentLevel);
+  });
+
+  const [movesLeft, setMovesLeft] = useState<number>(() => {
+    const saved = loadBoardState(progress.currentLevel);
+    return saved ? saved.movesLeft : getLevelMoveLimit(progress.currentLevel);
+  });
+
   const [extraBottlesAdded, setExtraBottlesAdded] = useState<number>(() => {
     const saved = loadBoardState(progress.currentLevel);
     return saved ? saved.extraBottlesAdded : 0;
   });
+
+  const [timeLimit, setTimeLimit] = useState<number>(() => {
+    const saved = loadBoardState(progress.currentLevel);
+    return saved ? saved.timeLimit : getLevelTimeLimit(progress.currentLevel);
+  });
+
+  const [timeLeft, setTimeLeft] = useState<number>(() => {
+    const saved = loadBoardState(progress.currentLevel);
+    return saved ? saved.timeLeft : getLevelTimeLimit(progress.currentLevel);
+  });
+
+  const [failReason, setFailReason] = useState<FailReason | null>(() => {
+    const saved = loadBoardState(progress.currentLevel);
+    if (!saved) return null;
+    if (saved.timeLeft === 0) return 'time_up';
+    if (saved.movesLeft === 0) return 'out_of_moves';
+    return null;
+  });
+
+  const [adExtensionsUsed, setAdExtensionsUsed] = useState<number>(0);
+  const [activeAdReward, setActiveAdReward] = useState<AdRewardType | null>(null);
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [invalidShakeIndex, setInvalidShakeIndex] = useState<number | null>(null);
@@ -136,10 +174,25 @@ export default function App() {
         bottles,
         history,
         moves,
+        movesLeft,
+        moveLimit,
         extraBottlesAdded,
+        timeLeft,
+        timeLimit,
       });
     }
-  }, [progress.currentLevel, bottles, history, moves, extraBottlesAdded, winSummary]);
+  }, [
+    progress.currentLevel,
+    bottles,
+    history,
+    moves,
+    movesLeft,
+    moveLimit,
+    extraBottlesAdded,
+    timeLeft,
+    timeLimit,
+    winSummary,
+  ]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -151,6 +204,33 @@ export default function App() {
       soundEngine.stopAmbientMusic();
     };
   }, [clearAnimTimers]);
+
+  // Per-level countdown timer (pauses on landing, modals, win, fail, or ad playback)
+  const isTimerPaused =
+    showLanding ||
+    activeModal !== 'none' ||
+    winSummary !== null ||
+    failReason !== null ||
+    activeAdReward !== null;
+
+  useEffect(() => {
+    if (isTimerPaused) return;
+
+    if (timeLeft <= 0) {
+      if (pourAnim === null) {
+        soundEngine.playInvalid();
+        setSelectedIndex(null);
+        setFailReason('time_up');
+      }
+      return;
+    }
+
+    const tick = window.setInterval(() => {
+      setTimeLeft((prev) => Math.max(0, prev - 1));
+    }, 1000);
+
+    return () => window.clearInterval(tick);
+  }, [isTimerPaused, timeLeft, pourAnim]);
 
   const canClaimDaily = useMemo(() => {
     const today = getTodayDateString();
@@ -164,19 +244,86 @@ export default function App() {
       setSelectedIndex(null);
       setHintMove(null);
       setWinSummary(null);
+      setFailReason(null);
+      setAdExtensionsUsed(0);
+      setActiveAdReward(null);
+
       const config = generateLevel(levelNum);
+      const tLimit = getLevelTimeLimit(levelNum);
+      const mLimit = getLevelMoveLimit(levelNum);
       setBottles(levelConfigToBottleStates(config));
       setHistory([]);
       setMoves(0);
+      setMoveLimit(mLimit);
+      setMovesLeft(mLimit);
       setExtraBottlesAdded(0);
+      setTimeLimit(tLimit);
+      setTimeLeft(tLimit);
     },
     [clearAnimTimers]
+  );
+
+  const grantAdReward = useCallback(
+    (rewardType: AdRewardType) => {
+      setActiveAdReward(null);
+      if (rewardType === 'add_time') {
+        soundEngine.playCoin();
+        triggerVibration(settings.vibrationEnabled, [18, 28, 18]);
+        setTimeLeft((prev) => prev + ADD_TIME_SECONDS);
+        setFailReason(null);
+        setAdExtensionsUsed((prev) => prev + 1);
+        showToast(`+${ADD_TIME_SECONDS} seconds added!`);
+      } else if (rewardType === 'add_moves') {
+        soundEngine.playCoin();
+        triggerVibration(settings.vibrationEnabled, [18, 28, 18]);
+        setMovesLeft((prev) => prev + ADD_MOVES_COUNT);
+        setFailReason(null);
+        setAdExtensionsUsed((prev) => prev + 1);
+        showToast(`+${ADD_MOVES_COUNT} extra moves added!`);
+      } else if (rewardType === 'add_bottle') {
+        soundEngine.playCoin();
+        triggerVibration(settings.vibrationEnabled, 18);
+        setSelectedIndex(null);
+        setHintMove(null);
+        setBottles((prev) => addExtraBottle(prev));
+        setExtraBottlesAdded((prev) => prev + 1);
+        showToast('Extra empty bottle added!');
+      }
+    },
+    [settings.vibrationEnabled, showToast]
+  );
+
+  const startRewardedAdFlow = useCallback(
+    (rewardType: AdRewardType) => {
+      soundEngine.unlockAudio();
+      soundEngine.playButtonClick();
+      triggerRewardedAd({
+        rewardType,
+        onGranted: () => grantAdReward(rewardType),
+        onDismissed: () => {
+          setActiveAdReward(null);
+          showToast('Ad skipped — reward not granted');
+        },
+        onFallbackPreview: () => {
+          setActiveAdReward(rewardType);
+        },
+      });
+    },
+    [grantAdReward, showToast]
   );
 
   const handleSelectBottle = useCallback(
     (index: number) => {
       soundEngine.unlockAudio();
-      if (pourAnim !== null || winSummary !== null) return;
+      if (
+        pourAnim !== null ||
+        winSummary !== null ||
+        failReason !== null ||
+        activeAdReward !== null ||
+        movesLeft <= 0
+      ) {
+        return;
+      }
 
       setHintMove(null);
 
@@ -221,6 +368,7 @@ export default function App() {
       const fromIdx = selectedIndex;
       const toIdx = index;
       const color = poured.move.color;
+      const nextMovesLeft = Math.max(0, movesLeft - 1);
 
       setSelectedIndex(null);
       setPourAnim({
@@ -241,6 +389,7 @@ export default function App() {
         setBottles(poured.bottles);
         setHistory((prev) => [...prev, poured.move]);
         setMoves((prev) => prev + 1);
+        setMovesLeft(nextMovesLeft);
 
         const destCompleted = isBottleCompleted(poured.bottles[toIdx]);
         if (destCompleted) {
@@ -288,14 +437,23 @@ export default function App() {
             coinsEarned: earned,
             streakBonus,
           });
+          return;
+        }
+
+        if (nextMovesLeft <= 0) {
+          soundEngine.playInvalid();
+          setFailReason('out_of_moves');
         }
       }, 650);
 
       timersRef.current.push(t1, t2, t3, t4);
     },
     [
+      activeAdReward,
       bottles,
+      failReason,
       moves,
+      movesLeft,
       pourAnim,
       progress.currentLevel,
       progress.streakCount,
@@ -315,7 +473,7 @@ export default function App() {
 
   const handleUndo = useCallback(() => {
     soundEngine.unlockAudio();
-    if (pourAnim !== null || history.length === 0) return;
+    if (pourAnim !== null || history.length === 0 || failReason !== null) return;
     const result = undoMove(bottles, history);
     if (!result) return;
 
@@ -326,38 +484,24 @@ export default function App() {
     setBottles(result.bottles);
     setHistory(result.history);
     setMoves((m) => Math.max(0, m - 1));
-  }, [bottles, history, pourAnim, settings.vibrationEnabled]);
+    setMovesLeft((m) => m + 1);
+  }, [bottles, failReason, history, pourAnim, settings.vibrationEnabled]);
 
   const handleAddBottle = useCallback(() => {
-    soundEngine.unlockAudio();
-    if (pourAnim !== null || extraBottlesAdded >= 2) return;
-    if (progress.coins < EXTRA_BOTTLE_COST) {
-      soundEngine.playInvalid();
-      showToast(`Need ${EXTRA_BOTTLE_COST} coins to add a bottle`);
+    if (
+      pourAnim !== null ||
+      extraBottlesAdded >= 2 ||
+      failReason !== null ||
+      activeAdReward !== null
+    ) {
       return;
     }
-
-    soundEngine.playCoin();
-    triggerVibration(settings.vibrationEnabled, 16);
-    setSelectedIndex(null);
-    setHintMove(null);
-    setBottles((prev) => addExtraBottle(prev));
-    setExtraBottlesAdded((prev) => prev + 1);
-    setProgress((prev) => ({
-      ...prev,
-      coins: prev.coins - EXTRA_BOTTLE_COST,
-    }));
-  }, [
-    extraBottlesAdded,
-    pourAnim,
-    progress.coins,
-    settings.vibrationEnabled,
-    showToast,
-  ]);
+    startRewardedAdFlow('add_bottle');
+  }, [activeAdReward, extraBottlesAdded, failReason, pourAnim, startRewardedAdFlow]);
 
   const handleHint = useCallback(() => {
     soundEngine.unlockAudio();
-    if (pourAnim !== null || winSummary !== null) return;
+    if (pourAnim !== null || winSummary !== null || failReason !== null) return;
     if (progress.coins < HINT_COST) {
       soundEngine.playInvalid();
       showToast(`Need ${HINT_COST} coins for a hint`);
@@ -384,6 +528,7 @@ export default function App() {
     timersRef.current.push(t);
   }, [
     bottles,
+    failReason,
     pourAnim,
     progress.coins,
     settings.vibrationEnabled,
@@ -461,7 +606,13 @@ export default function App() {
         return;
       }
 
-      if (activeModal !== 'none' || winSummary !== null || pourAnim !== null) {
+      if (
+        activeModal !== 'none' ||
+        winSummary !== null ||
+        pourAnim !== null ||
+        failReason !== null ||
+        activeAdReward !== null
+      ) {
         return;
       }
 
@@ -482,8 +633,10 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    activeAdReward,
     activeModal,
     bottles.length,
+    failReason,
     handleHint,
     handleRestart,
     handleSelectBottle,
@@ -518,7 +671,8 @@ export default function App() {
         <>
           <GameHeader
             levelNumber={progress.currentLevel}
-            moves={moves}
+            movesLeft={movesLeft}
+            timeLeft={timeLeft}
             coins={progress.coins}
             canClaimDaily={canClaimDaily}
             onOpenSettings={() => {
@@ -556,7 +710,12 @@ export default function App() {
             hintMove={hintMove}
             pourAnim={pourAnim}
             colorblindSymbols={settings.colorblindSymbols}
-            disabled={pourAnim !== null || winSummary !== null}
+            disabled={
+              pourAnim !== null ||
+              winSummary !== null ||
+              failReason !== null ||
+              activeAdReward !== null
+            }
             onSelectBottle={handleSelectBottle}
           />
 
@@ -566,7 +725,12 @@ export default function App() {
             canAddBottle={extraBottlesAdded < 2}
             extraBottlesAdded={extraBottlesAdded}
             coins={progress.coins}
-            disabled={pourAnim !== null || winSummary !== null}
+            disabled={
+              pourAnim !== null ||
+              winSummary !== null ||
+              failReason !== null ||
+              activeAdReward !== null
+            }
             onRestart={handleRestart}
             onUndo={handleUndo}
             onAddBottle={handleAddBottle}
@@ -575,6 +739,34 @@ export default function App() {
 
           <AdSlot enabled={false} />
         </>
+      )}
+
+      {/* Time's Up or Out of Moves Modal (repeatable Watch Ad to continue or Restart) */}
+      {failReason !== null && !winSummary && activeAdReward === null && (
+        <LevelFailedModal
+          reason={failReason}
+          levelNumber={progress.currentLevel}
+          movesUsed={moves}
+          extensionsUsed={adExtensionsUsed}
+          onWatchAdToContinue={() =>
+            startRewardedAdFlow(
+              failReason === 'time_up' ? 'add_time' : 'add_moves'
+            )
+          }
+          onRestartLevel={handleRestart}
+        />
+      )}
+
+      {/* Built-in Rewarded Ad Player Fallback */}
+      {activeAdReward !== null && (
+        <RewardedAdModal
+          rewardType={activeAdReward}
+          onRewardCompleted={() => grantAdReward(activeAdReward)}
+          onCancel={() => {
+            setActiveAdReward(null);
+            showToast('Ad skipped — reward not granted');
+          }}
+        />
       )}
 
       {/* Win Celebration Modal */}

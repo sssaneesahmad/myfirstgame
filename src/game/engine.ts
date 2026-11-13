@@ -234,9 +234,14 @@ interface SolverNode {
 export function solvePuzzle(
   initialBottles: BottleState[],
   maxIterations = 9000
-): { solvable: boolean; firstMove: { fromIndex: number; toIndex: number } | null; statesExplored: number } {
+): {
+  solvable: boolean;
+  firstMove: { fromIndex: number; toIndex: number } | null;
+  statesExplored: number;
+  solutionDepth: number;
+} {
   if (checkWinCondition(initialBottles)) {
-    return { solvable: true, firstMove: null, statesExplored: 0 };
+    return { solvable: true, firstMove: null, statesExplored: 0, solutionDepth: 0 };
   }
 
   const visited = new Set<string>();
@@ -306,6 +311,7 @@ export function solvePuzzle(
             solvable: true,
             firstMove: current.firstMove ?? { fromIndex: i, toIndex: j },
             statesExplored: iterations,
+            solutionDepth: current.depth + 1,
           };
         }
 
@@ -329,7 +335,7 @@ export function solvePuzzle(
     }
   }
 
-  return { solvable: false, firstMove: null, statesExplored: iterations };
+  return { solvable: false, firstMove: null, statesExplored: iterations, solutionDepth: 0 };
 }
 
 export function findHintMove(
@@ -453,6 +459,50 @@ export function getColorCountForLevel(levelNumber: number): number {
   return 10;
 }
 
+export function getLevelTimeLimit(levelNumber: number): number {
+  const colors = getColorCountForLevel(levelNumber);
+  switch (colors) {
+    case 3:
+      return 25;
+    case 4:
+      return 35;
+    case 5:
+      return 45;
+    case 6:
+      return 60;
+    case 7:
+      return 75;
+    case 8:
+      return 90;
+    case 9:
+      return 105;
+    default:
+      return 120;
+  }
+}
+
+export function getLevelMoveLimit(levelNumber: number): number {
+  const colors = getColorCountForLevel(levelNumber);
+  switch (colors) {
+    case 3:
+      return 12;
+    case 4:
+      return 18;
+    case 5:
+      return 24;
+    case 6:
+      return 30;
+    case 7:
+      return 36;
+    case 8:
+      return 42;
+    case 9:
+      return 48;
+    default:
+      return 56;
+  }
+}
+
 function buildLevelBottlesFromSeed(
   colorCount: number,
   emptyCount: number,
@@ -527,8 +577,9 @@ export function generateLevel(levelNumber: number): LevelConfig {
   }
 
   const colorCount = getColorCountForLevel(safeLevel);
+  const moveLimit = getLevelMoveLimit(safeLevel);
 
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 40; attempt++) {
     const seed = safeLevel * 104729 + attempt * 7919 + 313;
     const raw = buildLevelBottlesFromSeed(colorCount, emptyCount, seed);
 
@@ -538,7 +589,7 @@ export function generateLevel(levelNumber: number): LevelConfig {
     if (!hasAnyValidMove(states)) continue;
 
     const solved = solvePuzzle(states, 9000);
-    if (solved.solvable) {
+    if (solved.solvable && solved.solutionDepth <= moveLimit) {
       return {
         levelNumber: safeLevel,
         colorCount,

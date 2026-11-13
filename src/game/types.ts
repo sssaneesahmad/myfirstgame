@@ -73,8 +73,14 @@ export interface SavedBoardState {
   bottles: BottleState[];
   history: MoveRecord[];
   moves: number;
+  movesLeft: number;
+  moveLimit: number;
   extraBottlesAdded: number;
+  timeLeft: number;
+  timeLimit: number;
 }
+
+export type AdRewardType = 'add_time' | 'add_moves' | 'add_bottle';
 
 export const BOTTLE_CAPACITY = 4;
 export const EXTRA_BOTTLE_COST = 20;
@@ -83,3 +89,5 @@ export const LEVEL_REWARD_COINS = 10;
 export const STREAK_BONUS_COINS = 5;
 export const DAILY_REWARD_COINS = 25;
 export const STARTING_COINS = 40;
+export const ADD_TIME_SECONDS = 20;
+export const ADD_MOVES_COUNT = 5;

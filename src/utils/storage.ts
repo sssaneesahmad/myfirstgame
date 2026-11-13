@@ -1,4 +1,5 @@
 import { COLOR_ORDER } from '../game/colors';
+import { getLevelMoveLimit, getLevelTimeLimit } from '../game/engine';
 import {
   BOTTLE_CAPACITY,
   BottleState,
@@ -183,15 +184,41 @@ export function loadBoardState(expectedLevel: number): SavedBoardState | null {
         )
       : [];
 
+    const defaultLimit = getLevelTimeLimit(expectedLevel);
+    const timeLimit =
+      typeof parsed.timeLimit === 'number' && parsed.timeLimit > 0
+        ? Math.min(parsed.timeLimit, defaultLimit + 180)
+        : defaultLimit;
+    const timeLeft =
+      typeof parsed.timeLeft === 'number' && parsed.timeLeft >= 0
+        ? Math.min(parsed.timeLeft, defaultLimit)
+        : defaultLimit;
+
+    const defaultMoveLimit = getLevelMoveLimit(expectedLevel);
+    const moveLimit =
+      typeof parsed.moveLimit === 'number' && parsed.moveLimit > 0
+        ? parsed.moveLimit
+        : defaultMoveLimit;
+    const movesUsed =
+      typeof parsed.moves === 'number' && parsed.moves >= 0 ? parsed.moves : 0;
+    const movesLeft =
+      typeof parsed.movesLeft === 'number' && parsed.movesLeft >= 0
+        ? parsed.movesLeft
+        : Math.max(0, moveLimit - movesUsed);
+
     return {
       levelNumber: expectedLevel,
       bottles: parsed.bottles,
       history,
-      moves: typeof parsed.moves === 'number' && parsed.moves >= 0 ? parsed.moves : 0,
+      moves: movesUsed,
+      movesLeft,
+      moveLimit,
       extraBottlesAdded:
         typeof parsed.extraBottlesAdded === 'number' && parsed.extraBottlesAdded >= 0
           ? parsed.extraBottlesAdded
           : 0,
+      timeLeft,
+      timeLimit,
     };
   } catch {
     return null;

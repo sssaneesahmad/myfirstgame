@@ -5,6 +5,8 @@ import {
   checkWinCondition,
   findHintMove,
   generateLevel,
+  getLevelMoveLimit,
+  getLevelTimeLimit,
   isBottleCompleted,
   levelConfigToBottleStates,
   performPour,
@@ -130,10 +132,30 @@ function makeBottle(id: string, colors: BottleState['colors']): BottleState {
 
     const solved = solvePuzzle(states, 12000);
     assert.equal(solved.solvable, true, `Level ${lvl} was not solvable!`);
+    assert.ok(
+      solved.solutionDepth <= getLevelMoveLimit(lvl),
+      `Level ${lvl} took ${solved.solutionDepth} moves, exceeding limit ${getLevelMoveLimit(lvl)}`
+    );
 
     const hint = findHintMove(states);
     assert.ok(hint, `Level ${lvl} should produce a valid hint`);
   }
+}
+
+// 7. Complexity-based timer and move-limit scaling
+{
+  assert.equal(getLevelTimeLimit(1), 25);
+  assert.equal(getLevelTimeLimit(2), 35);
+  assert.equal(getLevelTimeLimit(4), 45);
+  assert.equal(getLevelTimeLimit(5), 60);
+  assert.ok(getLevelTimeLimit(35) > getLevelTimeLimit(10));
+  assert.ok(getLevelTimeLimit(10) > getLevelTimeLimit(1));
+
+  assert.equal(getLevelMoveLimit(1), 12);
+  assert.equal(getLevelMoveLimit(2), 18);
+  assert.equal(getLevelMoveLimit(4), 24);
+  assert.equal(getLevelMoveLimit(5), 30);
+  assert.ok(getLevelMoveLimit(35) > getLevelMoveLimit(10));
 }
 
 console.log('ALL_WATER_SORT_ENGINE_TESTS_PASSED');
