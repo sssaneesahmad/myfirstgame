@@ -15,23 +15,121 @@ interface GameBoardProps {
   onSelectBottle: (index: number) => void;
 }
 
-interface ViewportSize {
+interface BoardDimensions {
   width: number;
   height: number;
 }
 
-function getRowDistribution(count: number, viewportWidth: number): number[] {
-  if (count <= 4) return [count];
-  if (count === 5) return viewportWidth >= 600 ? [5] : [3, 2];
-  if (count === 6) return viewportWidth >= 680 ? [6] : [3, 3];
-  if (count === 7) return [4, 3];
-  if (count === 8) return [4, 4];
-  if (count === 9) return [5, 4];
-  if (count === 10) return [5, 5];
-  if (count === 11) return [6, 5];
-  if (count === 12) return [6, 6];
-  const top = Math.ceil(count / 2);
-  return [top, count - top];
+const BOTTLE_ASPECT = 92 / 224; // ~0.4107
+
+function splitIntoRows(count: number, numRows: number): number[] {
+  const base = Math.floor(count / numRows);
+  const remainder = count % numRows;
+  const rows: number[] = [];
+  for (let i = 0; i < numRows; i++) {
+    rows.push(base + (i < remainder ? 1 : 0));
+  }
+  return rows;
+}
+
+interface ComputedLayout {
+  rows: number[];
+  bottleWidth: number;
+  bottleHeight: number;
+  colGap: number;
+  rowGap: number;
+}
+
+function computeAdaptiveLayout(
+  count: number,
+  boardWidth: number,
+  boardHeight: number
+): ComputedLayout {
+  const safeCount = Math.max(1, count);
+  const padX = boardWidth < 400 ? 12 : boardWidth < 768 ? 20 : 32;
+  const padY = boardHeight < 420 ? 28 : 44;
+
+  const usableW = Math.max(240, Math.min(1080, boardWidth - padX));
+  const usableH = Math.max(180, boardHeight - padY);
+
+  // Build candidate row counts depending on total bottles
+  const rowCountsToTry: number[] = [2];
+  if (safeCount <= 8) {
+    rowCountsToTry.unshift(1);
+  }
+  if (safeCount >= 9) {
+    rowCountsToTry.push(3);
+  }
+
+  // Max bottle cap scales down gently as bottle count rises so high levels feel proportional
+  const viewportCap =
+    boardWidth >= 1024 ? 94 : boardWidth >= 768 ? 82 : boardWidth >= 430 ? 72 : 66;
+  const densityScale =
+    safeCount >= 12 ? 0.84 : safeCount >= 10 ? 0.89 : safeCount >= 8 ? 0.94 : 1;
+  const maxBottleCap = Math.round(viewportCap * densityScale);
+
+  let bestLayout: ComputedLayout | null = null;
+  let bestScore = -Infinity;
+
+  for (const numRows of rowCountsToTry) {
+    const rows = splitIntoRows(safeCount, numRows);
+    const maxCols = Math.max(...rows);
+
+    const colGap =
+      usableW < 380
+        ? maxCols >= 6
+          ? 6
+          : 9
+        : usableW < 680
+          ? maxCols >= 6
+            ? 10
+            : 14
+          : maxCols >= 6
+            ? 16
+            : 22;
+
+    const rowGap =
+      numRows === 1 ? 0 : usableH < 360 ? 10 : usableH < 520 ? 16 : 24;
+
+    const maxW = Math.floor((usableW - colGap * (maxCols - 1)) / maxCols);
+    const maxH = Math.floor((usableH - rowGap * (numRows - 1)) / numRows);
+    const wByH = Math.floor(maxH * BOTTLE_ASPECT);
+
+    const bottleWidth = Math.max(32, Math.min(maxBottleCap, maxW, wByH));
+    const bottleHeight = Math.round(bottleWidth / BOTTLE_ASPECT);
+
+    const totalW = bottleWidth * maxCols + colGap * (maxCols - 1);
+    const totalH = bottleHeight * numRows + rowGap * (numRows - 1);
+
+    const fitsCleanly = totalW <= usableW + 1 && totalH <= usableH + 1;
+
+    // Score favors largest comfortable bottle size, with slight preference for 1-2 balanced rows when bottles remain readable
+    let score = bottleWidth;
+    if (!fitsCleanly) score -= 500;
+    if (numRows === 1 && safeCount <= 6 && bottleWidth >= 60) score += 5;
+    if (numRows === 2 && bottleWidth >= 46) score += 4;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestLayout = {
+        rows,
+        bottleWidth,
+        bottleHeight,
+        colGap,
+        rowGap,
+      };
+    }
+  }
+
+  return (
+    bestLayout ?? {
+      rows: [safeCount],
+      bottleWidth: 48,
+      bottleHeight: 117,
+      colGap: 10,
+      rowGap: 14,
+    }
+  );
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
@@ -44,10 +142,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   disabled,
   onSelectBottle,
 }) => {
+  const boardRef = useRef<HTMLElement | null>(null);
   const bottleRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const [viewport, setViewport] = useState<ViewportSize>(() => ({
+  const [boardSize, setBoardSize] = useState<BoardDimensions>(() => ({
     width: typeof window !== 'undefined' ? window.innerWidth : 1024,
-    height: typeof window !== 'undefined' ? window.innerHeight : 768,
+    height:
+      typeof window !== 'undefined'
+        ? Math.max(260, window.innerHeight - 210)
+        : 540,
   }));
   const [pourTransform, setPourTransform] = useState<BottlePourTransform | null>(
     null
@@ -56,52 +158,33 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     useState<PourStreamGeometry | null>(null);
 
   useEffect(() => {
-    const onResize = () => {
-      setViewport({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
+    const el = boardRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setBoardSize({ width: rect.width, height: rect.height });
+      }
     };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+
+    updateSize();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(el);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  const layout = useMemo(() => {
-    const rows = getRowDistribution(bottles.length, viewport.width);
-    const maxCols = Math.max(...rows);
-    const rowCount = rows.length;
-
-    // Reserve space for header (~72px) and bottom controls (~136px) and vertical padding
-    const availableHeight = Math.max(260, viewport.height - 235);
-    const availableWidth = Math.min(920, viewport.width - 24);
-
-    const colGap = viewport.width < 400 ? 10 : viewport.width < 768 ? 16 : 24;
-    const rowGap = viewport.height < 640 ? 14 : 24;
-
-    const maxBottleWidthByCols = Math.floor(
-      (availableWidth - colGap * (maxCols - 1)) / maxCols
-    );
-    const maxBottleHeightByRows = Math.floor(
-      (availableHeight - rowGap * (rowCount - 1)) / rowCount
-    );
-
-    // Aspect ratio of bottle SVG is 92 / 224 (~0.4107)
-    const widthFromHeight = Math.floor(maxBottleHeightByRows * 0.41);
-    const maxCap = viewport.width >= 1024 ? 92 : viewport.width >= 768 ? 82 : 72;
-    const bottleWidth = Math.max(
-      42,
-      Math.min(maxCap, maxBottleWidthByCols, widthFromHeight)
-    );
-    const bottleHeight = Math.round(bottleWidth / 0.4107);
-
-    return {
-      rows,
-      bottleWidth,
-      bottleHeight,
-      colGap,
-      rowGap,
-    };
-  }, [bottles.length, viewport.width, viewport.height]);
+  const layout = useMemo(
+    () =>
+      computeAdaptiveLayout(bottles.length, boardSize.width, boardSize.height),
+    [bottles.length, boardSize.width, boardSize.height]
+  );
 
   // Calculate exact screen coordinates for the animated pour trajectory
   useEffect(() => {
@@ -121,11 +204,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     const fromCenterX = fromRect.left + fromRect.width / 2;
     const toCenterX = toRect.left + toRect.width / 2;
 
-    // Tilt left if destination is to the left, or right if destination is to the right
     const pourRight = toCenterX >= fromCenterX;
     const tiltDeg = pourRight ? 52 : -52;
 
-    // Offset so source bottle mouth hovers cleanly above destination mouth
     const mouthOffsetX = pourRight
       ? -toRect.width * 0.58
       : toRect.width * 0.58;
@@ -141,11 +222,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     } else if (pourAnim.phase === 'pouring') {
       setPourTransform({ tx, ty, rotate: tiltDeg });
 
-      // Compute mouth tip of tilted bottle in screen space
       const mouthX = toCenterX + (pourRight ? -6 : 6);
       const mouthY = toRect.top - 10;
 
-      // Liquid target Y inside destination bottle
       const destBottle = bottles[pourAnim.toIndex];
       const fillRatio = Math.min(
         1,
@@ -168,7 +247,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     }
   }, [pourAnim, bottles]);
 
-  // Build row slices
   const rowSlices = useMemo(() => {
     const slices: { bottle: BottleState; globalIndex: number }[][] = [];
     let cursor = 0;
@@ -184,13 +262,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   }, [bottles, layout.rows]);
 
   return (
-    <main className="relative z-10 flex-1 w-full flex flex-col items-center justify-center px-3 py-2 overflow-visible min-h-0">
+    <main
+      ref={boardRef}
+      className="relative z-10 flex-1 w-full flex flex-col items-center justify-center px-2 sm:px-4 py-2 overflow-visible min-h-0"
+    >
       {/* Decorative Fantasy Lotus Centerpiece Behind Bottles */}
       <CentralArtwork />
 
       {/* Balanced Responsive Bottle Rows */}
       <div
-        className="relative z-10 flex flex-col items-center justify-center w-full max-w-4xl"
+        className="relative z-10 flex flex-col items-center justify-center w-full max-w-5xl"
         style={{ gap: `${layout.rowGap}px` }}
       >
         {rowSlices.map((row, rIdx) => (

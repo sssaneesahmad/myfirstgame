@@ -61,13 +61,15 @@ export const Bottle: React.FC<BottleProps> = ({
           .map((c) => LIQUID_COLORS[c].name)
           .join(', ')}${completed ? ', completed' : ''}`;
 
+  const liftPx = Math.max(8, Math.min(16, Math.round(height * 0.085)));
+
   const style: React.CSSProperties = {
     width: `${width}px`,
     height: `${height}px`,
     transform: pourTransform
       ? `translate3d(${pourTransform.tx}px, ${pourTransform.ty}px, 0) rotate(${pourTransform.rotate}deg)`
       : selected
-        ? 'translate3d(0, -16px, 0) scale(1.04)'
+        ? `translate3d(0, -${liftPx}px, 0) scale(1.04)`
         : 'translate3d(0, 0, 0) scale(1)',
     transition: pourTransform
       ? 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)'
